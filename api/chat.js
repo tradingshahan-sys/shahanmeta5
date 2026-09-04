@@ -1,247 +1,661 @@
 // api/chat.js
 // ============================================================
-// SHAHANFX AI — Main AI Trading Assistant
+// SHAHANFX AI PRO — MASTER AI ENGINE
+// Market + Economic Data + Gemini
 // ============================================================
 
-export default async function handler(req, res) {
-  // ----------------------------------------------------------
-  // CORS
-  // ----------------------------------------------------------
-  res.setHeader("Access-Control-Allow-Origin", "*");
+import {
+  getMarketSnapshot
+} from "../lib/twelveData.js";
+
+import {
+  getEconomicCalendar
+} from "../lib/fmp.js";
+
+import {
+  analyzeTrading,
+  getGeminiError
+} from "../lib/gemini.js";
+
+import {
+  getBaghdadDate
+} from "../lib/dates.js";
+
+import {
+  getRequestBody,
+  safeString
+} from "../lib/helpers.js";
+
+
+// ============================================================
+// CORS
+// ============================================================
+
+function setCors(res) {
+
+  res.setHeader(
+    "Access-Control-Allow-Origin",
+    "*"
+  );
+
   res.setHeader(
     "Access-Control-Allow-Methods",
     "GET, POST, OPTIONS"
   );
+
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type"
   );
 
-  if (req.method === "OPTIONS") {
-    return res.status(204).end();
+}
+
+
+// ============================================================
+// Find Economic Event
+// ============================================================
+
+function findEvents(
+  events,
+  keywords
+) {
+
+  if (
+    !Array.isArray(events)
+  ) {
+
+    return [];
+
   }
 
-  // ----------------------------------------------------------
-  // Only POST
-  // ----------------------------------------------------------
-  if (req.method !== "POST") {
-    return res.status(405).json({
-      success: false,
-      error: "Only POST method is allowed"
-    });
-  }
 
-  // ----------------------------------------------------------
-  // Environment variables
-  // ----------------------------------------------------------
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+  return events.filter(
+    (event) => {
 
-  if (!GEMINI_API_KEY) {
-    return res.status(500).json({
-      success: false,
-      error: "GEMINI_API_KEY is not configured"
-    });
-  }
+      const name =
+        String(
+          event?.event || ""
+        ).toLowerCase();
 
-  // ----------------------------------------------------------
-  // Read request
-  // ----------------------------------------------------------
-  try {
-    const {
-      message = "",
-      symbol = "XAU/USD",
-      interval = "15min",
-      image = null
-    } = req.body || {};
 
-    if (!message && !image) {
-      return res.status(400).json({
-        success: false,
-        error: "Message or image is required"
-      });
+      return keywords.some(
+        (keyword) =>
+          name.includes(
+            keyword
+          )
+      );
+
     }
+  );
 
-    // --------------------------------------------------------
-    // Basic trading context
-    // --------------------------------------------------------
-    const tradingContext = `
-You are ShahanFX AI Pro.
+}
 
-Your job is to analyze financial markets professionally.
 
-IMPORTANT RULES:
+// ============================================================
+// US Economic Events
+// ============================================================
 
-1. Never invent live market prices.
-2. Never invent economic news.
-3. Never invent CPI, NFP, FOMC, PPI or GDP data.
-4. Never claim 100% certainty.
-5. If live data is unavailable, clearly say so.
-6. Do not give fake entry prices.
-7. Do not calculate lot size without balance and risk percentage.
-8. Use ICT and SMC concepts when relevant.
-9. Explain the reasoning behind the analysis.
-10. Risk management is more important than prediction.
+function getImportantUSData(
+  events
+) {
 
-Supported concepts:
+  const usEvents =
+    Array.isArray(events)
+      ? events.filter(
+          (event) => {
 
-- Market Structure
-- BOS
-- CHOCH
-- Liquidity
-- Liquidity Sweep
-- Fair Value Gap
-- Order Block
-- Breaker Block
-- Premium / Discount
-- Displacement
-- Imbalance
-- Kill Zones
-- London Session
-- New York Session
-- Support / Resistance
-- Candlestick confirmation
+            const country =
+              String(
+                event?.country || ""
+              )
+              .trim()
+              .toUpperCase();
 
-Current symbol:
-${symbol}
 
-Current timeframe:
-${interval}
+            const currency =
+              String(
+                event?.currency || ""
+              )
+              .trim()
+              .toUpperCase();
 
-User message:
-${message}
-`;
 
-    // --------------------------------------------------------
-    // Gemini models
-    // --------------------------------------------------------
-    const models = [
-      "gemini-3.7-flash",
-      "gemini-3.6-flash",
-      "gemini-3.5-flash"
-    ];
-
-    let lastError = null;
-
-    for (const model of models) {
-      try {
-        // ----------------------------------------------------
-        // Build Gemini content
-        // ----------------------------------------------------
-        const parts = [
-          {
-            text: tradingContext
-          }
-        ];
-
-        // ----------------------------------------------------
-        // Optional image
-        // ----------------------------------------------------
-        if (image) {
-          let mimeType = "image/jpeg";
-          let base64Data = image;
-
-          if (image.startsWith("data:")) {
-            const match = image.match(
-              /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/
+            return (
+              country === "US" ||
+              country === "USA" ||
+              country === "UNITED STATES" ||
+              currency === "USD"
             );
 
-            if (match) {
-              mimeType = match[1];
-              base64Data = match[2];
-            }
           }
+        )
+      : [];
 
-          parts.push({
-            inlineData: {
-              mimeType,
-              data: base64Data
-            }
-          });
-        }
 
-        // ----------------------------------------------------
-        // Gemini request
-        // ----------------------------------------------------
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-goog-api-key": GEMINI_API_KEY
-            },
-            body: JSON.stringify({
-              contents: [
-                {
-                  role: "user",
-                  parts
-                }
-              ],
-              generationConfig: {
-                temperature: 0.2,
-                maxOutputTokens: 5000
-              }
-            })
-          }
-        );
+  return {
 
-        const data = await response.json();
+    cpi:
+      findEvents(
+        usEvents,
+        [
+          "consumer price index",
+          "cpi"
+        ]
+      ),
 
-        // ----------------------------------------------------
-        // Gemini error
-        // ----------------------------------------------------
-        if (!response.ok) {
-          lastError =
-            data?.error?.message ||
-            `Gemini HTTP ${response.status}`;
+    nfp:
+      findEvents(
+        usEvents,
+        [
+          "nonfarm payroll",
+          "non-farm payroll",
+          "nonfarm employment",
+          "nfp"
+        ]
+      ),
 
-          continue;
-        }
+    fomc:
+      findEvents(
+        usEvents,
+        [
+          "fomc",
+          "federal funds rate",
+          "fed interest rate",
+          "interest rate decision"
+        ]
+      ),
 
-        // ----------------------------------------------------
-        // Extract answer
-        // ----------------------------------------------------
-        const answer =
-          data?.candidates?.[0]?.content?.parts
-            ?.map((part) => part.text || "")
-            .join("")
-            .trim();
+    ppi:
+      findEvents(
+        usEvents,
+        [
+          "producer price index",
+          "ppi"
+        ]
+      ),
 
-        if (!answer) {
-          lastError = "Gemini returned an empty response";
-          continue;
-        }
+    gdp:
+      findEvents(
+        usEvents,
+        [
+          "gross domestic product",
+          "gdp"
+        ]
+      )
 
-        // ----------------------------------------------------
-        // Success
-        // ----------------------------------------------------
-        return res.status(200).json({
-          success: true,
-          answer,
-          model,
-          symbol,
-          interval,
-          hasImage: Boolean(image)
-        });
+  };
 
-      } catch (error) {
-        lastError = error.message || "Unknown Gemini error";
-      }
+}
+
+
+// ============================================================
+// Market Context
+// ============================================================
+
+function buildMarketContext(
+  market
+) {
+
+  if (!market) {
+
+    return {
+
+      available: false,
+
+      message:
+        "Live market data is unavailable."
+
+    };
+
+  }
+
+
+  return {
+
+    available: true,
+
+    symbol:
+      market.symbol,
+
+    interval:
+      market.interval,
+
+    price:
+      market.price,
+
+    change:
+      market.change,
+
+    changePercent:
+      market.changePercent,
+
+    direction:
+      market.direction,
+
+    currentCandle:
+      market.currentCandle,
+
+    previousCandle:
+      market.previousCandle,
+
+    candles:
+      market.candles
+
+  };
+
+}
+
+
+// ============================================================
+// Economic Context
+// ============================================================
+
+function buildEconomicContext(
+  data
+) {
+
+  if (
+    !data
+  ) {
+
+    return {
+
+      available: false,
+
+      message:
+        "Economic data is unavailable."
+
+    };
+
+  }
+
+
+  return {
+
+    available: true,
+
+    cpi:
+      data.cpi || [],
+
+    nfp:
+      data.nfp || [],
+
+    fomc:
+      data.fomc || [],
+
+    ppi:
+      data.ppi || [],
+
+    gdp:
+      data.gdp || []
+
+  };
+
+}
+
+
+// ============================================================
+// Main Handler
+// ============================================================
+
+export default async function handler(
+  req,
+  res
+) {
+
+  setCors(res);
+
+
+  // ==========================================================
+  // OPTIONS
+  // ==========================================================
+
+  if (
+    req.method === "OPTIONS"
+  ) {
+
+    return res.status(204).end();
+
+  }
+
+
+  // ==========================================================
+  // METHOD
+  // ==========================================================
+
+  if (
+    req.method !== "POST"
+  ) {
+
+    return res.status(405).json({
+
+      success: false,
+
+      error:
+        "Only POST method is allowed"
+
+    });
+
+  }
+
+
+  // ==========================================================
+  // ENVIRONMENT
+  // ==========================================================
+
+  const missingKeys = [];
+
+
+  if (
+    !process.env.GEMINI_API_KEY
+  ) {
+
+    missingKeys.push(
+      "GEMINI_API_KEY"
+    );
+
+  }
+
+
+  if (
+    !process.env.TWELVE_DATA_API_KEY
+  ) {
+
+    missingKeys.push(
+      "TWELVE_DATA_API_KEY"
+    );
+
+  }
+
+
+  if (
+    !process.env.FMP_API_KEY
+  ) {
+
+    missingKeys.push(
+      "FMP_API_KEY"
+    );
+
+  }
+
+
+  if (
+    missingKeys.length
+  ) {
+
+    return res.status(500).json({
+
+      success: false,
+
+      error:
+        "Required environment variables are missing",
+
+      missing:
+        missingKeys
+
+    });
+
+  }
+
+
+  try {
+
+    // ========================================================
+    // REQUEST
+    // ========================================================
+
+    const body =
+      getRequestBody(req);
+
+
+    const message =
+      safeString(
+        body.message,
+        ""
+      ).trim();
+
+
+    const symbol =
+      safeString(
+        body.symbol,
+        "XAU/USD"
+      );
+
+
+    const interval =
+      safeString(
+        body.interval,
+        "15min"
+      );
+
+
+    const image =
+      body.image ||
+      null;
+
+
+    if (
+      !message &&
+      !image
+    ) {
+
+      return res.status(400).json({
+
+        success: false,
+
+        error:
+          "Message or image is required"
+
+      });
+
     }
 
-    // --------------------------------------------------------
-    // All models failed
-    // --------------------------------------------------------
-    return res.status(503).json({
-      success: false,
-      error: "All Gemini models failed",
-      details: lastError
+
+    // ========================================================
+    // DATE RANGE
+    // ========================================================
+
+    const startDate =
+      getBaghdadDate(-2);
+
+
+    const endDate =
+      getBaghdadDate(14);
+
+
+    // ========================================================
+    // LOAD DATA
+    // ========================================================
+
+    const results =
+      await Promise.allSettled([
+
+        getMarketSnapshot(
+          symbol,
+          interval
+        ),
+
+        getEconomicCalendar(
+          startDate,
+          endDate
+        )
+
+      ]);
+
+
+    // ========================================================
+    // MARKET RESULT
+    // ========================================================
+
+    let market =
+      null;
+
+
+    if (
+      results[0].status ===
+      "fulfilled"
+    ) {
+
+      market =
+        results[0].value;
+
+    }
+
+
+    // ========================================================
+    // ECONOMIC RESULT
+    // ========================================================
+
+    let economic =
+      null;
+
+
+    if (
+      results[1].status ===
+      "fulfilled"
+    ) {
+
+      economic =
+        getImportantUSData(
+          results[1].value
+        );
+
+    }
+
+
+    // ========================================================
+    // AI DATA STATUS
+    // ========================================================
+
+    const marketAvailable =
+      Boolean(market);
+
+
+    const economicAvailable =
+      Boolean(economic);
+
+
+    // ========================================================
+    // GEMINI ANALYSIS
+    // ========================================================
+
+    const aiResult =
+      await analyzeTrading({
+
+        symbol,
+
+        interval,
+
+        message,
+
+        image,
+
+        marketData:
+          buildMarketContext(
+            market
+          ),
+
+        newsData:
+          buildEconomicContext(
+            economic
+          )
+
+      });
+
+
+    // ========================================================
+    // RESPONSE
+    // ========================================================
+
+    return res.status(200).json({
+
+      success: true,
+
+      project:
+        "ShahanFX AI Pro",
+
+      answer:
+        aiResult.text,
+
+      model:
+        aiResult.model,
+
+      symbol,
+
+      interval,
+
+      data: {
+
+        market: {
+
+          available:
+            marketAvailable,
+
+          error:
+            results[0].status ===
+            "rejected"
+              ? results[0].reason?.message ||
+                "Market data failed"
+              : null
+
+        },
+
+        economic: {
+
+          available:
+            economicAvailable,
+
+          error:
+            results[1].status ===
+            "rejected"
+              ? results[1].reason?.message ||
+                "Economic data failed"
+              : null
+
+        }
+
+      },
+
+      timestamp:
+        new Date().toISOString()
+
     });
 
+
   } catch (error) {
-    return res.status(500).json({
+
+    // ========================================================
+    // GEMINI / SERVER ERROR
+    // ========================================================
+
+    const geminiError =
+      getGeminiError(
+        error
+      );
+
+
+    return res.status(
+      geminiError.status >= 500
+        ? 503
+        : geminiError.status
+    ).json({
+
       success: false,
-      error: error.message || "Server error"
+
+      project:
+        "ShahanFX AI Pro",
+
+      error:
+        geminiError.message,
+
+      provider:
+        geminiError.provider,
+
+      timestamp:
+        new Date().toISOString()
+
     });
+
   }
+
 }
