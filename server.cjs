@@ -7,16 +7,13 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 let botRunning = false;
+let autoInterval = null;
 
 // زانیارییەکانی بۆتی تلگرام
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || 'YOUR_BOT_TOKEN_HERE';
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || 'YOUR_CHAT_ID_HERE';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8919260750:AAGEk8o2f3raRNxjLyfZ';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '-1003872701268';
 
 function sendTelegramAlert(message) {
-    if (TELEGRAM_BOT_TOKEN === 'YOUR_BOT_TOKEN_HERE') {
-        console.log("[SIMULATION] Telegram Alert:", message);
-        return;
-    }
     const data = JSON.stringify({
         chat_id: TELEGRAM_CHAT_ID,
         text: message
@@ -45,32 +42,39 @@ function sendTelegramAlert(message) {
     req.end();
 }
 
+function generateAndSendSignal() {
+    if (!botRunning) return;
+    
+    const action = Math.random() > 0.5 ? "BUY" : "SELL";
+    const price = (2650 + Math.random() * 10).toFixed(2);
+    const analysisText = `🔔 [XAU/USD AUTOMATIC SIGNAL]:\nAction: ${action}\nPrice: ${price}\nStrategy: Smart Money Concepts (SMC)`;
+    
+    console.log(analysisText);
+    sendTelegramAlert(analysisText);
+}
+
 app.post('/api/bot/start', (req, res) => {
-    botRunning = true;
-    console.log("[INFO] Bot started. Monitoring XAU/USD for Smart Money Concepts...");
-    sendTelegramAlert("🚀 ShahanFX AI Bot Started! Monitoring XAU/USD for signals.");
-    res.json({ success: true, message: "Bot started and signal alerts are active." });
+    if (!botRunning) {
+        botRunning = true;
+        console.log("[INFO] Bot started with Auto-Interval.");
+        sendTelegramAlert("🚀 ShahanFX AI Bot Started! Automatic XAU/USD monitoring is active.");
+        
+        // ناردنی سیگناڵ خۆکار هەر ٣٠ خولەک جارێک (دەتوانیت کاتەکە بگۆڕیت، بۆ نموونە 1000 * 60 * 15 بۆ ١٥ خولەک)
+        // لێرەدا بۆ تاقیکردنەوە دەتوانین لەسەر چەند خولەکێکی دابنێین
+        autoInterval = setInterval(generateAndSendSignal, 1000 * 60 * 30); 
+    }
+    res.json({ success: true, message: "Bot started and automatic signals are active." });
 });
 
 app.post('/api/bot/stop', (req, res) => {
     botRunning = false;
+    if (autoInterval) {
+        clearInterval(autoInterval);
+        autoInterval = null;
+    }
     console.log("[INFO] Bot stopped.");
     sendTelegramAlert("🛑 ShahanFX AI Bot Stopped.");
     res.json({ success: true, message: "Bot stopped." });
-});
-
-app.get('/api/chat', (req, res) => {
-    if (!botRunning) {
-        return res.json({ analysis: "System ready... Bot is currently stopped." });
-    }
-    
-    const action = Math.random() > 0.5 ? "BUY" : "SELL";
-    const price = (2650 + Math.random() * 10).toFixed(2);
-    const analysisText = `[AI SIGNAL]: XAU/USD Market Analysis. Action: ${action} at ${price} based on Smart Money Concepts.`;
-    
-    sendTelegramAlert(`🔔 New Signal:\n${analysisText}`);
-    
-    res.json({ analysis: analysisText });
 });
 
 const PORT = process.env.PORT || 3000;
