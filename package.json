@@ -1,0 +1,13 @@
+{
+  "name": "shahanfx-backend",
+  "version": "1.0.0",
+  "description": "ShahanFX AI Trading Backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "vercel dev"
+  },
+  "engines": {
+    "node": ">=18.x"
+  }
+}
