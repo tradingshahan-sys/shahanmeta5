@@ -1,13 +1,12 @@
 {
-  "name": "shahanfx-backend",
+  "name": "shahanfx-bot",
   "version": "1.0.0",
-  "description": "ShahanFX AI Trading Backend",
-  "private": true,
-  "type": "module",
+  "description": "XAU/USD SMC Trading Bot with Telegram Alerts",
+  "main": "server.cjs",
   "scripts": {
-    "start": "vercel dev"
+    "start": "node server.cjs"
   },
-  "engines": {
-    "node": ">=18.x"
+  "dependencies": {
+    "express": "^4.18.2"
   }
 }
