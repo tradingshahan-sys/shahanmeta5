@@ -1,15 +1,19 @@
+require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const https = require('https');
-const app = express();
+const { GoogleGenAI } = require('@google/genai');
 
+const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ڕێکخستنی جێمینی
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 let botRunning = false;
 let autoInterval = null;
 
-// زانیارییەکانی بۆتی تلگرام
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8919260750:AAGEk8o2f3raRNxjLyfZ';
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '-1003872701268';
 
@@ -42,25 +46,45 @@ function sendTelegramAlert(message) {
     req.end();
 }
 
-function generateAndSendSignal() {
+// ناردنی شیکاری خودکار لە ڕێگەی جێمینییەوە بۆ تلگرام
+async function generateAndSendSignal() {
     if (!botRunning) return;
     
-    const action = Math.random() > 0.5 ? "BUY" : "SELL";
-    const price = (2650 + Math.random() * 10).toFixed(2);
-    const analysisText = `🔔 [XAU/USD AUTOMATIC SIGNAL]:\nAction: ${action}\nPrice: ${price}\nStrategy: Smart Money Concepts (SMC)`;
-    
-    console.log(analysisText);
-    sendTelegramAlert(analysisText);
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: 'Analyze XAU/USD using Smart Money Concepts, Order Blocks, and wick analysis. Give a short trading signal with BUY/SELL, SL, and TP.',
+        });
+        
+        const analysisText = `🔔 [XAU/USD AI SIGNAL]:\n${response.text}`;
+        console.log(analysisText);
+        sendTelegramAlert(analysisText);
+    } catch (err) {
+        console.error("Gemini Signal Error:", err);
+    }
 }
+
+// ڕێڕەوی تایبەت بە چات لەگەڵ ڕاوێژی زیرەک لە ڕووکارەوە
+app.post('/api/chat', async (req, res) => {
+    try {
+        const userMessage = req.body.message;
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: userMessage,
+        });
+        
+        res.json({ success: true, reply: response.text });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, error: 'Failed to fetch AI response' });
+    }
+});
 
 app.post('/api/bot/start', (req, res) => {
     if (!botRunning) {
         botRunning = true;
         console.log("[INFO] Bot started with Auto-Interval.");
         sendTelegramAlert("🚀 ShahanFX AI Bot Started! Automatic XAU/USD monitoring is active.");
-        
-        // ناردنی سیگناڵ خۆکار هەر ٣٠ خولەک جارێک (دەتوانیت کاتەکە بگۆڕیت، بۆ نموونە 1000 * 60 * 15 بۆ ١٥ خولەک)
-        // لێرەدا بۆ تاقیکردنەوە دەتوانین لەسەر چەند خولەکێکی دابنێین
         autoInterval = setInterval(generateAndSendSignal, 1000 * 60 * 30); 
     }
     res.json({ success: true, message: "Bot started and automatic signals are active." });
